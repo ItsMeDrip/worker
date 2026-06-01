@@ -9,6 +9,7 @@ const client = new Client({
 })
 
 const PANEL_CHANNEL_ID = '1510954258118479944'
+const STATUS_CHANNEL_ID = '1510956160549781545'
 let myBot = { name: null, ip: null, port: null, bot: null }
 
 client.on('ready', () => console.log(`Bot online as ${client.user.tag}!`))
@@ -98,8 +99,12 @@ function startBot() {
     host: myBot.ip, port: myBot.port, username: myBot.name, version: '1.20.1', auth: 'offline'
   })
   myBot.bot = bot
-  bot.once('spawn', () => {
+  bot.once('spawn', async () => {
     console.log(`${myBot.name} is online!`)
+    try {
+      const ch = client.channels.cache.get(STATUS_CHANNEL_ID)
+      if (ch) await ch.send(`🟢 **${myBot.name}** is online!\n🌐 ${myBot.ip}:${myBot.port}`)
+    } catch {}
     setTimeout(() => {
       bot.chat('/register pass123 pass123')
       setTimeout(() => {
@@ -113,8 +118,12 @@ function startBot() {
       }, 2000)
     }, 3000)
   })
-  const handleDisconnect = () => {
+  const handleDisconnect = async (reason) => {
     cleanupBot()
+    try {
+      const ch = client.channels.cache.get(STATUS_CHANNEL_ID)
+      if (ch) await ch.send(`🔴 **${myBot.name}** got kicked!\n🌐 ${myBot.ip}:${myBot.port}\n**Reason:** ${typeof reason === 'string' ? reason : JSON.stringify(reason)}`)
+    } catch {}
     setTimeout(() => { if (myBot.name) startBot() }, 60000)
   }
   bot.on('kicked', handleDisconnect)
