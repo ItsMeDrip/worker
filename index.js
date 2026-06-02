@@ -1,18 +1,46 @@
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js')
+const {
+  Client,
+  GatewayIntentBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder
+} = require('discord.js')
+
 const mineflayer = require('mineflayer')
 const http = require('http')
 
-http.createServer((req, res) => { res.write('alive!'); res.end() }).listen(3000)
+http.createServer((req, res) => {
+  res.write('alive!')
+  res.end()
+}).listen(3000)
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 })
 
 const PANEL_CHANNEL_ID = '1510954258118479944'
 const STATUS_CHANNEL_ID = '1510956160549781545'
-let myBot = { name: null, ip: null, port: null, bot: null }
+const MAX_SLOTS = 7
 
-client.on('ready', () => console.log(`Bot online as ${client.user.tag}!`))
+const registrations = new Map()
+
+function getUserBots(userId) {
+  if (!registrations.has(userId)) registrations.set(userId, [])
+  return registrations.get(userId)
+}
+
+client.on('ready', () => {
+  console.log(`Bot online as ${client.user.tag}!`)
+})
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return
@@ -20,115 +48,481 @@ client.on('messageCreate', async (message) => {
   if (message.content !== '!panel') return
 
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('register').setLabel('Register').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('start').setLabel('Start Bot').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('stop').setLabel('Stop Bot').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder()
+      .setCustomId('register')
+      .setLabel('Register')
+      .setStyle(ButtonStyle.Primary),
+
+    new ButtonBuilder()
+      .setCustomId('manage')
+      .setLabel('Edit Registration')
+      .setStyle(ButtonStyle.Secondary),
+
+    new ButtonBuilder()
+      .setCustomId('status')
+      .setLabel('Status')
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId('delete_all')
+      .setLabel('Delete')
+      .setStyle(ButtonStyle.Danger)
   )
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('status').setLabel('Status').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('delete').setLabel('Delete').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('edit').setLabel('Edit Registration').setStyle(ButtonStyle.Primary)
-  )
+
   const embed = new EmbedBuilder()
-    .setTitle('🤖 Bot Control Panel')
-    .setDescription(myBot.name ? `**Registered Bot:** ${myBot.name}\n**Server:** ${myBot.ip}:${myBot.port}` : 'No bot registered yet!')
+    .setTitle('Bot Control Panel')
+    .setDescription('Register and manage up to 7 Minecraft bots.')
     .setColor(0x9B59B6)
     .setTimestamp()
-  await message.channel.send({ embeds: [embed], components: [row1, row2] })
+
+  await message.channel.send({
+    embeds: [embed],
+    components: [row1]
+  })
 })
 
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
-    if (interaction.customId === 'register' || interaction.customId === 'edit') {
-      const modal = new ModalBuilder().setCustomId('registerModal').setTitle('Register Bot')
+    const userId = interaction.user.id
+    const bots = getUserBots(userId)
+
+    if (interaction.customId === 'register') {
+      if (bots.length >= MAX_SLOTS) {
+        return interaction.reply({
+          content: 'You already used all 7 registration slots.',
+          ephemeral: true
+        })
+      }
+
+      const modal = new ModalBuilder()
+        .setCustomId('register_modal')
+        .setTitle('Register Bot')
+
+      const nameInput = new TextInputBuilder()
+        .setCustomId('botName')
+        .setLabel('Bot Username')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+
+      const addressInput = new TextInputBuilder()
+        .setCustomId('botAddress')
+        .setLabel('Server Address, example: name.aternos.me:12345')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('botName').setLabel('Bot Username').setStyle(TextInputStyle.Short).setRequired(true).setValue(myBot.name || '')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('botAddress').setLabel('Server Address (e.g name.aternos.me:12345)').setStyle(TextInputStyle.Short).setRequired(true).setValue(myBot.ip ? `${myBot.ip}:${myBot.port}` : ''))
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(addressInput)
       )
-      return await interaction.showModal(modal)
+
+      return interaction.showModal(modal)
     }
 
-    if (interaction.customId === 'start') {
-      if (!myBot.name) return interaction.reply({ content: '❌ Register first!', ephemeral: true })
-      if (myBot.bot) return interaction.reply({ content: '❌ Bot is already running!', ephemeral: true })
-      startBot()
-      return interaction.reply({ content: '🚀 Bot is starting!', ephemeral: true })
+    if (interaction.customId === 'manage') {
+      if (!bots.length) {
+        return interaction.reply({
+          content: 'You have no registrations yet.',
+          ephemeral: true
+        })
+      }
+
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('select_bot')
+        .setPlaceholder('Choose a registration')
+        .addOptions(
+          bots.map((bot, index) => ({
+            label: `${index + 1}. ${bot.name}`,
+            description: `${bot.ip}:${bot.port}`,
+            value: String(index)
+          }))
+        )
+
+      return interaction.reply({
+        content: 'Choose which registration you want to manage.',
+        components: [new ActionRowBuilder().addComponents(menu)],
+        ephemeral: true
+      })
     }
 
     if (interaction.customId === 'status') {
-      return interaction.reply({ content: `Bot Status: ${myBot.bot ? '🟢 Online' : '🔴 Offline'}${myBot.name ? `\nBot: ${myBot.name}\nServer: ${myBot.ip}:${myBot.port}` : ''}`, ephemeral: true })
+      if (!bots.length) {
+        return interaction.reply({
+          content: 'You have no registrations yet.',
+          ephemeral: true
+        })
+      }
+
+      const text = bots.map((bot, index) => {
+        const state = bot.bot ? 'Online' : 'Offline'
+        return `Slot ${index + 1}: ${bot.name}\nServer: ${bot.ip}:${bot.port}\nStatus: ${state}`
+      }).join('\n\n')
+
+      return interaction.reply({
+        content: text,
+        ephemeral: true
+      })
     }
 
-    if (interaction.customId === 'stop') {
-      if (!myBot.bot) return interaction.reply({ content: '❌ Bot is not running!', ephemeral: true })
-      cleanupBot()
-      return interaction.reply({ content: '🔴 Bot stopped!', ephemeral: true })
+    if (interaction.customId === 'delete_all') {
+      for (const bot of bots) cleanupBot(bot)
+
+      registrations.set(userId, [])
+
+      return interaction.reply({
+        content: 'All your registrations were deleted.',
+        ephemeral: true
+      })
     }
 
-    if (interaction.customId === 'delete') {
-      cleanupBot()
-      myBot = { name: null, ip: null, port: null, bot: null }
-      return interaction.reply({ content: '🗑️ Bot deleted! Register again.', ephemeral: true })
+    if (interaction.customId.startsWith('start_')) {
+      const index = Number(interaction.customId.split('_')[1])
+      const bot = bots[index]
+
+      if (!bot) {
+        return interaction.reply({
+          content: 'That registration no longer exists.',
+          ephemeral: true
+        })
+      }
+
+      if (bot.bot) {
+        return interaction.reply({
+          content: 'That bot is already running.',
+          ephemeral: true
+        })
+      }
+
+      startBot(bot)
+
+      return interaction.reply({
+        content: `Starting ${bot.name}.`,
+        ephemeral: true
+      })
+    }
+
+    if (interaction.customId.startsWith('stop_')) {
+      const index = Number(interaction.customId.split('_')[1])
+      const bot = bots[index]
+
+      if (!bot) {
+        return interaction.reply({
+          content: 'That registration no longer exists.',
+          ephemeral: true
+        })
+      }
+
+      if (!bot.bot) {
+        return interaction.reply({
+          content: 'That bot is already offline.',
+          ephemeral: true
+        })
+      }
+
+      cleanupBot(bot)
+
+      return interaction.reply({
+        content: `Stopped ${bot.name}.`,
+        ephemeral: true
+      })
+    }
+
+    if (interaction.customId.startsWith('delete_')) {
+      const index = Number(interaction.customId.split('_')[1])
+      const bot = bots[index]
+
+      if (!bot) {
+        return interaction.reply({
+          content: 'That registration no longer exists.',
+          ephemeral: true
+        })
+      }
+
+      cleanupBot(bot)
+      bots.splice(index, 1)
+
+      return interaction.reply({
+        content: `Deleted registration ${index + 1}.`,
+        ephemeral: true
+      })
+    }
+
+    if (interaction.customId.startsWith('edit_')) {
+      const index = Number(interaction.customId.split('_')[1])
+      const bot = bots[index]
+
+      if (!bot) {
+        return interaction.reply({
+          content: 'That registration no longer exists.',
+          ephemeral: true
+        })
+      }
+
+      const modal = new ModalBuilder()
+        .setCustomId(`edit_modal_${index}`)
+        .setTitle('Edit Registration')
+
+      const nameInput = new TextInputBuilder()
+        .setCustomId('botName')
+        .setLabel('Bot Username')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(bot.name)
+
+      const addressInput = new TextInputBuilder()
+        .setCustomId('botAddress')
+        .setLabel('Server Address, example: name.aternos.me:12345')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(`${bot.ip}:${bot.port}`)
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(addressInput)
+      )
+
+      return interaction.showModal(modal)
     }
   }
 
-  if (interaction.isModalSubmit() && interaction.customId === 'registerModal') {
-    const name = interaction.fields.getTextInputValue('botName')
-    const address = interaction.fields.getTextInputValue('botAddress')
-    const [ip, portStr] = address.split(':')
-    const port = parseInt(portStr)
-    if (!ip || !port) return interaction.reply({ content: '❌ Invalid address! Use: name.aternos.me:12345', ephemeral: true })
-    cleanupBot()
-    myBot = { name, ip, port, bot: null }
-    return interaction.reply({ content: `✅ Registered!\nName: ${name}\nServer: ${ip}:${port}`, ephemeral: true })
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId !== 'select_bot') return
+
+    const userId = interaction.user.id
+    const bots = getUserBots(userId)
+    const index = Number(interaction.values[0])
+    const bot = bots[index]
+
+    if (!bot) {
+      return interaction.reply({
+        content: 'That registration no longer exists.',
+        ephemeral: true
+      })
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`start_${index}`)
+        .setLabel('Start')
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId(`stop_${index}`)
+        .setLabel('Stop')
+        .setStyle(ButtonStyle.Danger),
+
+      new ButtonBuilder()
+        .setCustomId(`edit_${index}`)
+        .setLabel('Edit')
+        .setStyle(ButtonStyle.Primary),
+
+      new ButtonBuilder()
+        .setCustomId(`delete_${index}`)
+        .setLabel('Delete')
+        .setStyle(ButtonStyle.Secondary)
+    )
+
+    return interaction.reply({
+      content: `Selected slot ${index + 1}: ${bot.name}\nServer: ${bot.ip}:${bot.port}\nStatus: ${bot.bot ? 'Online' : 'Offline'}`,
+      components: [row],
+      ephemeral: true
+    })
+  }
+
+  if (interaction.isModalSubmit()) {
+    const userId = interaction.user.id
+    const bots = getUserBots(userId)
+
+    const name = interaction.fields.getTextInputValue('botName').trim()
+    const address = interaction.fields.getTextInputValue('botAddress').trim()
+    const [ip, portText] = address.split(':')
+    const port = Number(portText)
+
+    if (!name) {
+      return interaction.reply({
+        content: 'Bot username cannot be empty.',
+        ephemeral: true
+      })
+    }
+
+    if (!ip || !Number.isInteger(port)) {
+      return interaction.reply({
+        content: 'Invalid address. Use this format: name.aternos.me:12345',
+        ephemeral: true
+      })
+    }
+
+    if (interaction.customId === 'register_modal') {
+      if (bots.length >= MAX_SLOTS) {
+        return interaction.reply({
+          content: 'You already used all 7 registration slots.',
+          ephemeral: true
+        })
+      }
+
+      bots.push({
+        name,
+        ip,
+        port,
+        bot: null,
+        afkInterval: null,
+        reconnectTimer: null,
+        stopping: false
+      })
+
+      return interaction.reply({
+        content: `Registered slot ${bots.length}.\nName: ${name}\nServer: ${ip}:${port}`,
+        ephemeral: true
+      })
+    }
+
+    if (interaction.customId.startsWith('edit_modal_')) {
+      const index = Number(interaction.customId.split('_')[2])
+      const bot = bots[index]
+
+      if (!bot) {
+        return interaction.reply({
+          content: 'That registration no longer exists.',
+          ephemeral: true
+        })
+      }
+
+      cleanupBot(bot)
+
+      bot.name = name
+      bot.ip = ip
+      bot.port = port
+
+      return interaction.reply({
+        content: `Updated slot ${index + 1}.\nName: ${name}\nServer: ${ip}:${port}`,
+        ephemeral: true
+      })
+    }
   }
 })
 
-function cleanupBot() {
-  if (myBot.afkInterval) { clearInterval(myBot.afkInterval); myBot.afkInterval = null }
-  if (myBot.bot) {
-    myBot.bot.removeAllListeners()
-    try { myBot.bot.quit() } catch {}
-    myBot.bot = null
+function cleanupBot(registration) {
+  registration.stopping = true
+
+  if (registration.afkInterval) {
+    clearInterval(registration.afkInterval)
+    registration.afkInterval = null
+  }
+
+  if (registration.reconnectTimer) {
+    clearTimeout(registration.reconnectTimer)
+    registration.reconnectTimer = null
+  }
+
+  if (registration.bot) {
+    registration.bot.removeAllListeners()
+
+    try {
+      registration.bot.quit()
+    } catch {}
+
+    registration.bot = null
   }
 }
 
-function startBot() {
-  cleanupBot()
-  const bot = require('mineflayer').createBot({
-    host: myBot.ip, port: myBot.port, username: myBot.name, version: '1.20.1', auth: 'offline'
+function startBot(registration) {
+  cleanupBot(registration)
+
+  registration.stopping = false
+
+  const bot = mineflayer.createBot({
+    host: registration.ip,
+    port: registration.port,
+    username: registration.name,
+    version: '1.20.1',
+    auth: 'offline'
   })
-  myBot.bot = bot
+
+  registration.bot = bot
+
   bot.once('spawn', async () => {
-    console.log(`${myBot.name} is online!`)
+    console.log(`${registration.name} is online!`)
+
     try {
-      const ch = client.channels.cache.get(STATUS_CHANNEL_ID)
-      if (ch) await ch.send(`🟢 **${myBot.name}** is online!\n🌐 ${myBot.ip}:${myBot.port}`)
+      const channel = client.channels.cache.get(STATUS_CHANNEL_ID)
+      if (channel) {
+        await channel.send(`${registration.name} is online!\n${registration.ip}:${registration.port}`)
+      }
     } catch {}
+
     setTimeout(() => {
+      if (!registration.bot) return
+
       bot.chat('/register pass123 pass123')
+
       setTimeout(() => {
+        if (!registration.bot) return
+
         bot.chat('/login pass123')
+
         setTimeout(() => {
-          myBot.afkInterval = setInterval(() => {
+          if (!registration.bot) return
+
+          registration.afkInterval = setInterval(() => {
+            if (!registration.bot) return
+
             bot.setControlState('jump', true)
-            setTimeout(() => bot.setControlState('jump', false), 500)
+
+            setTimeout(() => {
+              if (registration.bot) bot.setControlState('jump', false)
+            }, 500)
           }, 30000)
         }, 2000)
       }, 2000)
     }, 3000)
   })
+
   const handleDisconnect = async (reason) => {
-    cleanupBot()
+    if (registration.stopping) return
+
+    if (registration.afkInterval) {
+      clearInterval(registration.afkInterval)
+      registration.afkInterval = null
+    }
+
+    registration.bot = null
+
     try {
-      const ch = client.channels.cache.get(STATUS_CHANNEL_ID)
-      if (ch) await ch.send(`🔴 **${myBot.name}** got kicked!\n🌐 ${myBot.ip}:${myBot.port}\n**Reason:** ${typeof reason === 'string' ? reason : JSON.stringify(reason)}`)
+      const channel = client.channels.cache.get(STATUS_CHANNEL_ID)
+      const reasonText = formatReason(reason)
+
+      if (channel) {
+        await channel.send(`${registration.name} disconnected.\n${registration.ip}:${registration.port}\nReason: ${reasonText}`)
+      }
     } catch {}
-    setTimeout(() => { if (myBot.name) startBot() }, 60000)
+
+    if (!registration.reconnectTimer) {
+      registration.reconnectTimer = setTimeout(() => {
+        registration.reconnectTimer = null
+        startBot(registration)
+      }, 60000)
+    }
   }
+
   bot.on('kicked', handleDisconnect)
   bot.on('error', handleDisconnect)
   bot.on('end', handleDisconnect)
+}
+
+function formatReason(reason) {
+  if (!reason) return 'Unknown'
+  if (typeof reason === 'string') return reason
+  if (reason.message) return reason.message
+
+  try {
+    return JSON.stringify(reason)
+  } catch {
+    return String(reason)
+  }
+}
+
+if (!process.env.TOKEN) {
+  console.error('Missing TOKEN environment variable.')
+  process.exit(1)
 }
 
 client.login(process.env.TOKEN)
