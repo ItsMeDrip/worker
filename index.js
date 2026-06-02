@@ -106,7 +106,8 @@ client.on('interactionCreate', async (interaction) => {
 
       const addressInput = new TextInputBuilder()
         .setCustomId('botAddress')
-        .setLabel('Server Address, example: name.aternos.me:12345')
+        .setLabel('Server Address')
+        .setPlaceholder('name.aternos.me:12345')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
 
@@ -270,7 +271,8 @@ client.on('interactionCreate', async (interaction) => {
 
       const addressInput = new TextInputBuilder()
         .setCustomId('botAddress')
-        .setLabel('Server Address, example: name.aternos.me:12345')
+        .setLabel('Server Address')
+        .setPlaceholder('name.aternos.me:12345')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setValue(`${bot.ip}:${bot.port}`)
