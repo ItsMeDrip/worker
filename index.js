@@ -367,6 +367,7 @@ client.on('interactionCreate', async (interaction) => {
         port,
         bot: null,
         afkInterval: null,
+        movementTimeout: null,
         reconnectTimer: null,
         stopping: false
       })
@@ -402,13 +403,27 @@ client.on('interactionCreate', async (interaction) => {
   }
 })
 
-function cleanupBot(registration) {
-  registration.stopping = true
-
+function stopRandomMovement(registration) {
   if (registration.afkInterval) {
-    clearInterval(registration.afkInterval)
+    clearTimeout(registration.afkInterval)
     registration.afkInterval = null
   }
+
+  if (registration.movementTimeout) {
+    clearTimeout(registration.movementTimeout)
+    registration.movementTimeout = null
+  }
+
+  if (registration.bot) {
+    for (const control of ['forward', 'back', 'left', 'right', 'jump', 'sneak']) {
+      registration.bot.setControlState(control, false)
+    }
+  }
+}
+
+function cleanupBot(registration) {
+  registration.stopping = true
+  stopRandomMovement(registration)
 
   if (registration.reconnectTimer) {
     clearTimeout(registration.reconnectTimer)
@@ -426,6 +441,66 @@ function cleanupBot(registration) {
   }
 }
 
+function startRandomMovement(registration, bot) {
+  stopRandomMovement(registration)
+
+  const controls = ['forward', 'back', 'left', 'right', 'jump', 'sneak']
+  const moveOptions = [
+    ['forward'],
+    ['forward', 'left'],
+    ['forward', 'right'],
+    ['back'],
+    ['left'],
+    ['right']
+  ]
+
+  const scheduleMove = () => {
+    if (!registration.bot || registration.bot !== bot) return
+
+    const waitTime = 4000 + Math.floor(Math.random() * 5000)
+
+    registration.afkInterval = setTimeout(() => {
+      if (!registration.bot || registration.bot !== bot) return
+
+      for (const control of controls) {
+        bot.setControlState(control, false)
+      }
+
+      const movement = moveOptions[Math.floor(Math.random() * moveOptions.length)]
+
+      for (const control of movement) {
+        bot.setControlState(control, true)
+      }
+
+      if (Math.random() < 0.35) {
+        bot.setControlState('jump', true)
+      }
+
+      if (bot.entity) {
+        const yaw = bot.entity.yaw + (Math.random() - 0.5) * Math.PI
+
+        try {
+          bot.look(yaw, bot.entity.pitch, true)
+        } catch {}
+      }
+
+      const moveTime = 1000 + Math.floor(Math.random() * 2000)
+
+      registration.movementTimeout = setTimeout(() => {
+        if (!registration.bot || registration.bot !== bot) return
+
+        for (const control of controls) {
+          bot.setControlState(control, false)
+        }
+
+        scheduleMove()
+      }, moveTime)
+    }, waitTime)
+  }
+
+  scheduleMove()
+}
+
 function startBot(registration) {
   cleanupBot(registration)
 
@@ -436,7 +511,8 @@ function startBot(registration) {
     port: registration.port,
     username: registration.name,
     version: '1.20.1',
-    auth: 'offline'
+    auth: 'offline',
+    viewDistance: 1
   })
 
   registration.bot = bot
@@ -452,27 +528,19 @@ function startBot(registration) {
     } catch {}
 
     setTimeout(() => {
-      if (!registration.bot) return
+      if (!registration.bot || registration.bot !== bot) return
 
       bot.chat('/register pass123 pass123')
 
       setTimeout(() => {
-        if (!registration.bot) return
+        if (!registration.bot || registration.bot !== bot) return
 
         bot.chat('/login pass123')
 
         setTimeout(() => {
-          if (!registration.bot) return
+          if (!registration.bot || registration.bot !== bot) return
 
-          registration.afkInterval = setInterval(() => {
-            if (!registration.bot) return
-
-            bot.setControlState('jump', true)
-
-            setTimeout(() => {
-              if (registration.bot) bot.setControlState('jump', false)
-            }, 500)
-          }, 30000)
+          startRandomMovement(registration, bot)
         }, 2000)
       }, 2000)
     }, 3000)
@@ -481,11 +549,7 @@ function startBot(registration) {
   const handleDisconnect = async (reason) => {
     if (registration.stopping) return
 
-    if (registration.afkInterval) {
-      clearInterval(registration.afkInterval)
-      registration.afkInterval = null
-    }
-
+    stopRandomMovement(registration)
     registration.bot = null
 
     try {
